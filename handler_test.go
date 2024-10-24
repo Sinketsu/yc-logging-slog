@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"maps"
+	"sync"
 	"testing"
 	"testing/slogtest"
 	"time"
@@ -20,6 +21,7 @@ type mockServer struct {
 
 	t       *testing.T
 	entries []*logging.IncomingLogEntry
+	mu      sync.Mutex
 }
 
 func newMockServer(t *testing.T) *mockServer {
@@ -33,12 +35,17 @@ func (s *mockServer) Write(ctx context.Context, r *logging.WriteRequest, _ ...gr
 	assert.Equal(s.t, "test", r.Resource.GetType())
 	assert.Equal(s.t, "slog-contract", r.Resource.GetId())
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.entries = append(s.entries, r.GetEntries()...)
 
 	return &logging.WriteResponse{}, nil
 }
 
 func (s *mockServer) getEntries() []*logging.IncomingLogEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	return s.entries
 }
 

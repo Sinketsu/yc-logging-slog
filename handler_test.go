@@ -87,3 +87,41 @@ func TestSlogContract(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestSpecialTypes(t *testing.T) {
+	handler, err := New(Options{
+		FolderId:     "test-folder",
+		ResourceType: "test",
+		ResourceId:   "slog-contract",
+		Credentials:  ycsdk.OAuthToken("test-token"),
+	})
+	require.NoError(t, err)
+
+	ms := newMockServer(t)
+	handler.log = ms
+
+	logger := slog.New(handler)
+
+	sliceField := []string{"foo", "bar"}
+	arrayField := [2]float64{0.1, 0.2}
+	mapField := map[string]int{"a": 10, "b": 20}
+
+	logger.With("slice", sliceField, "array", arrayField, "map", mapField).Info("test special cases")
+	require.Eventually(t, func() bool {
+		return len(ms.getEntries()) > 0
+	}, 10*time.Second, 100*time.Millisecond)
+
+	gotFields := ms.getEntries()[0].JsonPayload.AsMap()
+	assert.ElementsMatch(t, sliceField, gotFields["slice"])
+	assert.ElementsMatch(t, arrayField, gotFields["array"])
+
+	// custom assertion of map, because of testify/assert can't compare map[string]int{} and map[string]any{}
+	gotMap, ok := gotFields["map"].(map[string]any)
+	assert.True(t, ok, "field `map` is not a map[string]any")
+	assert.Equal(t, len(mapField), len(gotMap), "lengths are different")
+	for k1, v1 := range mapField {
+		if v2, ok := gotMap[k1]; !ok || assert.ObjectsAreEqual(v1, v2) {
+			assert.Fail(t, "elements %v and %v are different", v1, v2)
+		}
+	}
+}

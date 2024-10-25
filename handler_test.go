@@ -125,3 +125,35 @@ func TestSpecialTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomStruct(t *testing.T) {
+	handler, err := New(Options{
+		FolderId:     "test-folder",
+		ResourceType: "test",
+		ResourceId:   "slog-contract",
+		Credentials:  ycsdk.OAuthToken("test-token"),
+	})
+	require.NoError(t, err)
+
+	ms := newMockServer(t)
+	handler.log = ms
+
+	logger := slog.New(handler)
+
+	type MyStruct struct {
+		IntField    int64
+		StringField string
+	}
+
+	my := MyStruct{IntField: 42, StringField: "test"}
+	logger.With("struct", my).Info("test custom struct")
+	require.Eventually(t, func() bool {
+		return len(ms.getEntries()) > 0
+	}, 10*time.Second, 100*time.Millisecond)
+
+	gotFields := ms.getEntries()[0].JsonPayload.AsMap()
+	gotStruct, ok := gotFields["struct"].(map[string]any)
+	assert.True(t, ok, "type of `struct` field is not map[string]any")
+	assert.EqualValues(t, 42, gotStruct["IntField"])
+	assert.EqualValues(t, "test", gotStruct["StringField"])
+}

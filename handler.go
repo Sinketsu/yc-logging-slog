@@ -139,7 +139,6 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 
 	payload, err := structpb.NewStruct(data)
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 

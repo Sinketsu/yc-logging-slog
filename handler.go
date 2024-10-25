@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"reflect"
 	"slices"
 	"time"
 
@@ -221,6 +222,27 @@ func (h *Handler) appendData(currentData map[string]any, attrs ...slog.Attr) {
 					h.appendData(group, a.Value.Group()...)
 					currentData[a.Key] = group
 				}
+			case slog.KindAny:
+				value := a.Value.Resolve().Any()
+				switch reflect.TypeOf(value).Kind() {
+				case reflect.Array, reflect.Slice:
+					parsedValue := reflect.ValueOf(value)
+					new := make([]any, parsedValue.Len())
+
+					for i := range parsedValue.Len() {
+						new[i] = parsedValue.Index(i).Interface()
+					}
+					value = new
+				case reflect.Map:
+					parsedValue := reflect.ValueOf(value)
+					new := make(map[string]any, parsedValue.Len())
+
+					for i := parsedValue.MapRange(); i.Next(); {
+						new[i.Key().String()] = i.Value().Interface()
+					}
+					value = new
+				}
+				currentData[a.Key] = value
 			default:
 				currentData[a.Key] = a.Value.Resolve().Any()
 			}

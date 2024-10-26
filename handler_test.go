@@ -103,10 +103,16 @@ func TestSpecialTypes(t *testing.T) {
 	logger := slog.New(handler)
 
 	sliceField := []string{"foo", "bar"}
+	doubleSliceField := [][]int{{42}, {84}}
 	arrayField := [2]float64{0.1, 0.2}
 	mapField := map[string]int{"a": 10, "b": 20}
 
-	logger.With("slice", sliceField, "array", arrayField, "map", mapField).Info("test special cases")
+	logger.With(
+		"slice", sliceField,
+		"doubleSlice", doubleSliceField,
+		"array", arrayField,
+		"map", mapField,
+	).Info("test special cases")
 	require.Eventually(t, func() bool {
 		return len(ms.getEntries()) > 0
 	}, 10*time.Second, 100*time.Millisecond)
@@ -122,6 +128,19 @@ func TestSpecialTypes(t *testing.T) {
 	for k1, v1 := range mapField {
 		if v2, ok := gotMap[k1]; !ok || assert.ObjectsAreEqual(v1, v2) {
 			assert.Fail(t, "elements %v and %v are different", v1, v2)
+		}
+	}
+
+	// custom assertiong for [][]int, because of testify/assert can't compare it properly
+	gotDoubleSlice, ok := gotFields["doubleSlice"].([]any)
+	assert.True(t, ok, "type of `doubleSlice` field is not []any")
+	assert.Equal(t, len(doubleSliceField), len(gotDoubleSlice), "lengths are different")
+	for i := range len(doubleSliceField) {
+		iSlice, ok := gotDoubleSlice[i].([]any)
+		assert.True(t, ok, "type of `doubleSlice[%d]` field is not []any", i)
+		assert.Equal(t, len(doubleSliceField[i]), len(iSlice), "lengths are different")
+		for j := range len(doubleSliceField[i]) {
+			assert.EqualValues(t, doubleSliceField[i][j], iSlice[j])
 		}
 	}
 }

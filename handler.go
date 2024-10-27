@@ -140,7 +140,6 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 
 	payload, err := structpb.NewStruct(data)
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 
@@ -215,25 +214,29 @@ func (h *Handler) addToLastGroup(data map[string]any, attrs ...slog.Attr) map[st
 func (h *Handler) appendData(currentData map[string]any, attrs ...slog.Attr) {
 	for _, a := range attrs {
 		if !a.Equal(slog.Attr{}) {
-			switch a.Value.Kind() {
+			switch resolved := a.Value.Resolve(); resolved.Kind() {
 			case slog.KindGroup:
 				if a.Key == "" {
-					h.appendData(currentData, a.Value.Group()...)
+					h.appendData(currentData, resolved.Group()...)
 				} else {
 					group := make(map[string]any)
-					h.appendData(group, a.Value.Group()...)
+					h.appendData(group, resolved.Group()...)
 					currentData[a.Key] = group
 				}
 			case slog.KindAny:
-				value, err := convertStructpb(a.Value.Resolve().Any())
+				value, err := convertStructpb(resolved.Any())
 				if err != nil {
 					currentData[a.Key] = "<error: " + err.Error() + ">"
 					continue
 				}
 
 				currentData[a.Key] = value.AsInterface()
+			case slog.KindDuration:
+				currentData[a.Key] = resolved.Duration().String()
+			case slog.KindTime:
+				currentData[a.Key] = resolved.Time().String()
 			default:
-				currentData[a.Key] = a.Value.Resolve().Any()
+				currentData[a.Key] = resolved.Any()
 			}
 		}
 	}

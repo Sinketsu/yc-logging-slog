@@ -2,15 +2,16 @@ package ycloggingslog
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
-	"reflect"
 	"slices"
 	"time"
 
 	"github.com/yandex-cloud/go-genproto/yandex/cloud/logging/v1"
 	ycsdk "github.com/yandex-cloud/go-sdk"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -213,39 +214,47 @@ func (h *Handler) addToLastGroup(data map[string]any, attrs ...slog.Attr) map[st
 func (h *Handler) appendData(currentData map[string]any, attrs ...slog.Attr) {
 	for _, a := range attrs {
 		if !a.Equal(slog.Attr{}) {
-			switch a.Value.Kind() {
+			switch resolved := a.Value.Resolve(); resolved.Kind() {
 			case slog.KindGroup:
 				if a.Key == "" {
-					h.appendData(currentData, a.Value.Group()...)
+					h.appendData(currentData, resolved.Group()...)
 				} else {
 					group := make(map[string]any)
-					h.appendData(group, a.Value.Group()...)
+					h.appendData(group, resolved.Group()...)
 					currentData[a.Key] = group
 				}
 			case slog.KindAny:
-				value := a.Value.Resolve().Any()
-				switch reflect.TypeOf(value).Kind() {
-				case reflect.Array, reflect.Slice:
-					parsedValue := reflect.ValueOf(value)
-					new := make([]any, parsedValue.Len())
-
-					for i := range parsedValue.Len() {
-						new[i] = parsedValue.Index(i).Interface()
-					}
-					value = new
-				case reflect.Map:
-					parsedValue := reflect.ValueOf(value)
-					new := make(map[string]any, parsedValue.Len())
-
-					for i := parsedValue.MapRange(); i.Next(); {
-						new[i.Key().String()] = i.Value().Interface()
-					}
-					value = new
+				value, err := convertStructpb(resolved.Any())
+				if err != nil {
+					currentData[a.Key] = "<error: " + err.Error() + ">"
+					continue
 				}
-				currentData[a.Key] = value
+
+				currentData[a.Key] = value.AsInterface()
+			case slog.KindDuration:
+				currentData[a.Key] = resolved.Duration().String()
+			case slog.KindTime:
+				currentData[a.Key] = resolved.Time().String()
 			default:
-				currentData[a.Key] = a.Value.Resolve().Any()
+				currentData[a.Key] = resolved.Any()
 			}
 		}
 	}
+}
+
+// Hack to get valid structpb from any value
+func convertStructpb(v any) (*structpb.Value, error) {
+	to := &structpb.Value{}
+
+	bytes, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+
+	err = protojson.Unmarshal(bytes, to)
+	if err != nil {
+		return nil, err
+	}
+
+	return to, nil
 }

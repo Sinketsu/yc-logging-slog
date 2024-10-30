@@ -16,6 +16,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+var (
+	Stream = "!_ycloggingslog.Stream_"
+)
+
 func loggingLevel(level slog.Level) logging.LogLevel_Level {
 	switch {
 	case level >= slog.LevelError:
@@ -36,6 +40,7 @@ type Handler struct {
 	ch          chan *logging.IncomingLogEntry
 	destination *logging.Destination
 	resource    *logging.LogEntryResource
+	stream      string
 	log         logging.LogIngestionServiceClient
 }
 
@@ -98,15 +103,10 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		return h
 	}
 
-	return &Handler{
-		data:        h.addToLastGroup(h.data, attrs...),
-		groups:      h.groups,
-		level:       h.level,
-		ch:          h.ch,
-		destination: h.destination,
-		resource:    h.resource,
-		log:         h.log,
-	}
+	clone := h.clone()
+	clone.appendLastGroup(attrs...)
+
+	return &clone
 }
 
 func (h *Handler) WithGroup(name string) slog.Handler {
@@ -114,15 +114,10 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 		return h
 	}
 
-	return &Handler{
-		data:        h.data,
-		groups:      append(slices.Clone(h.groups), name),
-		level:       h.level,
-		ch:          h.ch,
-		destination: h.destination,
-		resource:    h.resource,
-		log:         h.log,
-	}
+	clone := h.clone()
+	clone.groups = append(clone.groups, name)
+
+	return &clone
 }
 
 func (h *Handler) Handle(_ context.Context, r slog.Record) error {
@@ -135,7 +130,9 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 			return true
 		})
 
-		data = h.addToLastGroup(data, attrs...)
+		tmp := &Handler{data: maps.Clone(h.data), groups: slices.Clone(h.groups)}
+		tmp.appendLastGroup(attrs...)
+		data = tmp.data
 	}
 
 	payload, err := structpb.NewStruct(data)
@@ -148,6 +145,7 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 		Level:       loggingLevel(r.Level),
 		Message:     r.Message,
 		JsonPayload: payload,
+		StreamName:  h.stream,
 	}
 
 	return nil
@@ -192,10 +190,8 @@ func (h *Handler) flush(buffer []*logging.IncomingLogEntry) {
 	}
 }
 
-func (h *Handler) addToLastGroup(data map[string]any, attrs ...slog.Attr) map[string]any {
-	data = maps.Clone(data)
-
-	current := data
+func (h *Handler) appendLastGroup(attrs ...slog.Attr) {
+	current := h.data
 	for _, g := range h.groups {
 		child, ok := current[g].(map[string]any)
 		if ok {
@@ -208,12 +204,16 @@ func (h *Handler) addToLastGroup(data map[string]any, attrs ...slog.Attr) map[st
 	}
 
 	h.appendData(current, attrs...)
-	return data
 }
 
 func (h *Handler) appendData(currentData map[string]any, attrs ...slog.Attr) {
 	for _, a := range attrs {
 		if !a.Equal(slog.Attr{}) {
+			if a.Key == Stream {
+				h.stream = a.Value.Resolve().String()
+				continue
+			}
+
 			switch resolved := a.Value.Resolve(); resolved.Kind() {
 			case slog.KindGroup:
 				if a.Key == "" {
@@ -239,6 +239,19 @@ func (h *Handler) appendData(currentData map[string]any, attrs ...slog.Attr) {
 				currentData[a.Key] = resolved.Any()
 			}
 		}
+	}
+}
+
+func (h *Handler) clone() Handler {
+	return Handler{
+		data:        maps.Clone(h.data),
+		groups:      slices.Clone(h.groups),
+		level:       h.level,
+		ch:          h.ch,
+		destination: h.destination,
+		resource:    h.resource,
+		stream:      h.stream,
+		log:         h.log,
 	}
 }
 

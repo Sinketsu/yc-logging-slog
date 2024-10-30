@@ -231,3 +231,39 @@ func TestAllSlogTypes(t *testing.T) {
 
 	assert.EqualValues(t, 24, gotFields["uint64"])
 }
+
+func TestStreamKey(t *testing.T) {
+	t.Parallel()
+
+	handler, err := New(Options{
+		FolderId:     "test-folder",
+		ResourceType: "test",
+		ResourceId:   "slog-contract",
+		Credentials:  ycsdk.OAuthToken("test-token"),
+	})
+	require.NoError(t, err)
+
+	ms := newMockServer(t)
+	handler.log = ms
+
+	logger := slog.New(handler)
+	logger1 := logger.With(Stream, "test-stream")
+	logger1.Info("test")
+
+	logger2 := logger.With(Stream, "test-stream2")
+	logger2.Info("test")
+
+	require.Eventually(t, func() bool {
+		return len(ms.getEntries()) > 0
+	}, 10*time.Second, 100*time.Millisecond)
+
+	gotStream1 := ms.getEntries()[0].StreamName
+	gotFields1 := ms.getEntries()[0].JsonPayload.AsMap()
+	gotStream2 := ms.getEntries()[1].StreamName
+	gotFields2 := ms.getEntries()[1].JsonPayload.AsMap()
+
+	assert.Equal(t, "test-stream", gotStream1)
+	assert.Equal(t, "test-stream2", gotStream2)
+	assert.NotContains(t, gotFields1, Stream)
+	assert.NotContains(t, gotFields2, Stream)
+}
